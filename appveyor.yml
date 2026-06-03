@@ -1,0 +1,32 @@
+version: 6.26.0.{build}
+image: Visual Studio 2022
+configuration: Release
+platform: x64
+install:
+- cmd: >-
+    call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+
+    git clone --depth 1 -b v3.4.12 https://github.com/AcademySoftwareFoundation/openexr.git
+
+    mkdir install
+
+    mkdir build
+
+    cd build
+
+    cmake -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DOPENEXR_BUILD_EXAMPLES=OFF -DOPENEXR_BUILD_TOOLS=OFF -DOPENEXR_INSTALL_TOOLS=OFF -DOPENEXR_TEST_LIBRARIES=OFF -DOPENEXR_TEST_PYTHON=OFF -DOPENEXR_TEST_TOOLS=OFF -DCMAKE_INSTALL_PREFIX=C:/projects/qt-exr-image-plugin/install ../openexr
+
+    nmake
+
+    nmake install
+
+    cd ..
+
+build_script:
+- cmd: >-
+    C:\Qt\6.9.3\msvc2022_64\bin\qmake.exe qt-exr-image-plugin.pro
+
+    nmake.exe
+
+artifacts:
+- path: kimg_exr6.dll
