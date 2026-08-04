@@ -1,4 +1,4 @@
-version: 6.26.0.{build}
+version: 6.28.1.{build}
 image: Visual Studio 2022
 configuration: Release
 platform: x64
@@ -6,7 +6,7 @@ install:
 - cmd: >-
     call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 
-    git clone --depth 1 -b v3.4.12 https://github.com/AcademySoftwareFoundation/openexr.git
+    git clone --depth 1 -b v3.4.13 https://github.com/AcademySoftwareFoundation/openexr.git
 
     mkdir install
 
