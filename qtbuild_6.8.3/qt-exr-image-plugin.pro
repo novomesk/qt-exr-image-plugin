@@ -1,13 +1,13 @@
 TARGET = kimg_exr6
 
 DEFINES += WINVER=0x0601 _WIN32_WINNT=0x0601
-INCLUDEPATH += ../install/include/Imath ../install/include/OpenEXR
+INCLUDEPATH += ../install-win7/include/Imath ../install-win7/include/OpenEXR
 
 HEADERS = ../src/exr_p.h ../src/scanlineconverter_p.h ../src/util_p.h
 SOURCES = ../src/exr.cpp ../src/scanlineconverter.cpp
 OTHER_FILES = ../src/exr.json
 
-LIBS += ../install/lib/OpenEXR-3_4.lib ../install/lib/OpenEXRUtil-3_4.lib ../install/lib/OpenEXRCore-3_4.lib ../install/lib/Iex-3_4.lib ../install/lib/IlmThread-3_4.lib ../install/lib/Imath-3_2.lib
+LIBS += ../install-win7/lib/OpenEXR-3_4.lib ../install-win7/lib/OpenEXRUtil-3_4.lib ../install-win7/lib/OpenEXRCore-3_4.lib ../install-win7/lib/Iex-3_4.lib ../install-win7/lib/IlmThread-3_4.lib ../install-win7/lib/Imath-3_2.lib
 
 TEMPLATE = lib
 

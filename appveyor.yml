@@ -22,6 +22,20 @@ install:
 
     cd ..
 
+    mkdir install-win7
+
+    mkdir build-win7
+
+    cd build-win7
+
+    cmake -G "NMake Makefiles" -DCMAKE_C_FLAGS="-DWINVER=0x0601 -D_WIN32_WINNT=0x0601" -DCMAKE_CXX_FLAGS="-DWINVER=0x0601 -D_WIN32_WINNT=0x0601" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DOPENEXR_BUILD_EXAMPLES=OFF -DOPENEXR_BUILD_TOOLS=OFF -DOPENEXR_INSTALL_TOOLS=OFF -DOPENEXR_TEST_LIBRARIES=OFF -DOPENEXR_TEST_PYTHON=OFF -DOPENEXR_TEST_TOOLS=OFF -DBUILD_WEBSITE=OFF -DCMAKE_INSTALL_PREFIX=C:/projects/qt-exr-image-plugin/install-win7 ../openexr
+
+    nmake
+
+    nmake install
+
+    cd ..
+
 build_script:
 - cmd: >-
     C:\Qt\6.9.3\msvc2022_64\bin\qmake.exe qt-exr-image-plugin.pro
