@@ -8,6 +8,8 @@
 */
 
 #include "exr_p.h"
+#include "microexif_p.h"
+#include "photoshop_p.h"
 #include "scanlineconverter_p.h"
 #include "util_p.h"
 
@@ -19,14 +21,23 @@
  */
 //#define EXR_CONVERT_TO_SRGB // default: commented -> you should define it in your cmake file
 
-/* *** EXR_STORE_XMP_ATTRIBUTE ***
- * If defined, disables the stores XMP values in a non-standard attribute named "xmp".
+/* *** EXR_DISABLE_XMP_ATTRIBUTE ***
+ * If defined, disables the storage of XMP values ​​in the non-standard attribute named "xmp"
  * The QImage metadata used is "XML:com.adobe.xmp".
  * NOTE: The use of non-standard attributes is possible but discouraged by the specification. However,
  *       metadata is essential for good image management and programs like darktable also set this
  *       attribute. Gimp reads the "xmp" attribute and Darktable writes it as well.
  */
 //#define EXR_DISABLE_XMP_ATTRIBUTE // default: commented -> you should define it in your cmake file
+
+/* *** EXR_DISABLE_ADOBE_ATTRIBUTE ***
+ * If defined, disables the storage of non-standard attribute "adobe_rsrc".
+ * NOTE: The use of non-standard attributes is possible but discouraged by the specification. However,
+ *       metadata is essential for good image management and programs like Photoshop also set this
+ *       attribute. Photoshop uses "adobe_rsrc" attribute to read/write XMP/EXIF/IPTC data.
+ */
+//#define EXR_DISABLE_ADOBE_ATTRIBUTE // default: commented -> you should define it in your cmake file
+
 
 /* *** EXR_MAX_IMAGE_WIDTH and EXR_MAX_IMAGE_HEIGHT ***
  * The maximum size in pixel allowed by the plugin.
@@ -88,6 +99,12 @@
 Q_LOGGING_CATEGORY(LOG_EXRPLUGIN, "kf.imageformats.plugins.exr", QtDebugMsg)
 #else
 Q_LOGGING_CATEGORY(LOG_EXRPLUGIN, "kf.imageformats.plugins.exr", QtWarningMsg)
+#endif
+
+#ifndef EXR_DISABLE_ADOBE_ATTRIBUTE
+#if QT_VERSION_CHECK(OPENEXR_VERSION_MAJOR, OPENEXR_VERSION_MINOR, OPENEXR_VERSION_PATCH) < QT_VERSION_CHECK(3, 3, 0)
+#define EXR_DISABLE_ADOBE_ATTRIBUTE
+#endif
 #endif
 
 class K_IStream : public Imf::IStream
@@ -200,12 +217,18 @@ void K_OStream::seekg(Imf::Int64 pos)
     m_dev->seek(pos);
 }
 
+#define EXR_SUBFORMAT_RGB QByteArray("RGB")
+
+#define EXR_SUBFORMAT_YC QByteArray("YC")
+
 EXRHandler::EXRHandler()
     : m_compressionRatio(-1)
     , m_quality(-1)
     , m_imageNumber(0)
     , m_imageCount(0)
     , m_startPos(-1)
+    , m_subType(EXR_SUBFORMAT_RGB)
+    , m_transformation(QImageIOHandler::TransformationNone)
 {
     // Set the number of threads to use (0 is allowed)
     Imf::setGlobalThreadCount(QThread::idealThreadCount() / 2);
@@ -225,7 +248,7 @@ bool EXRHandler::canRead() const
 static QImage::Format imageFormat(const Imf::RgbaInputFile &file)
 {
     auto isRgba = file.channels() & Imf::RgbaChannels::WRITE_A;
-    return (isRgba ? QImage::Format_RGBA16FPx4 : QImage::Format_RGBX16FPx4);
+    return (isRgba ? QImage::Format_RGBA16FPx4_Premultiplied : QImage::Format_RGBX16FPx4);
 }
 
 /*!
@@ -284,6 +307,27 @@ static void printAttributes(const Imf::Header &h)
     }
 }
 #endif
+
+static PSDImageResourceSection readPSDImageResourceSection(const Imf::Header &header)
+{
+    if (auto adobe = header.findTypedAttribute<Imf::OpaqueAttribute>("adobe_rsrc")) {
+        auto &&data = adobe->data();
+        auto ba = QByteArray(data, data.size());
+        ba.prepend((data.size()) & 0xFF);
+        ba.prepend((data.size() >> 8) & 0xFF);
+        ba.prepend((data.size() >> 16) & 0xFF);
+        ba.prepend((data.size() >> 24) & 0xFF);
+        QDataStream ds(ba);
+        ds.setByteOrder(QDataStream::BigEndian);
+        auto ok = false;
+        auto irs = readImageResourceSection(ds, &ok);
+        if (ok) {
+            return irs;
+        }
+    }
+    return{};
+}
+
 
 /*!
  * \brief readMetadata
@@ -379,6 +423,20 @@ static void readMetadata(const Imf::Header &header, QImage &image)
     }
     if (auto focalLen = header.findTypedAttribute<Imf::FloatAttribute>("effectiveFocalLength")) {
         image.setText(QStringLiteral(META_KEY_FOCALLENGTH), QLocale::c().toString(focalLen->value()));
+    }
+
+    // Photoshop image resource section
+    auto irs = readPSDImageResourceSection(header);
+    if (irs.contains(IRI_EXIFDATA1)) {
+        auto exif = MicroExif::fromByteArray(irs.value(IRI_EXIFDATA1).data);
+        exif.updateImageMetadata(image);
+        exif.updateImageResolution(image);
+    }
+    if (irs.contains(IRI_XMPMETADATA)) {
+        auto irb = irs.value(IRI_XMPMETADATA);
+        auto xmp = QString::fromUtf8(irb.data);
+        if (!xmp.isEmpty())
+            image.setText(QStringLiteral(META_KEY_XMP_ADOBE), xmp);
     }
 }
 
@@ -514,9 +572,9 @@ bool makePreview(const QImage &image, Imf::Array2D<Imf::PreviewRgba> &pixels)
 
     QImage preview;
     if (w > h) {
-        preview = image.scaledToWidth(256).convertToFormat(QImage::Format_ARGB32);
+        preview = image.scaledToWidth(256).convertToFormat(QImage::Format_ARGB32_Premultiplied);
     } else {
-        preview = image.scaledToHeight(256).convertToFormat(QImage::Format_ARGB32);
+        preview = image.scaledToHeight(256).convertToFormat(QImage::Format_ARGB32_Premultiplied);
     }
     if (preview.isNull()) {
         return false;
@@ -545,8 +603,11 @@ bool makePreview(const QImage &image, Imf::Array2D<Imf::PreviewRgba> &pixels)
  * \brief setMetadata
  * Reades the metadata from \a image and set its as attributes in the \a header.
  */
-static void setMetadata(const QImage &image, Imf::Header &header)
+static void setMetadata(const QImage &image, Imf::Header &header, const QImageIOHandler::Transformation &transformation)
 {
+    PSDImageResourceSection irs;
+    QString xmpData;
+
     auto dateTime = QDateTime::currentDateTime();
     for (auto &&key : image.textKeys()) {
         auto text = image.text(key);
@@ -577,11 +638,9 @@ static void setMetadata(const QImage &image, Imf::Header &header)
             }
         }
 
-#ifndef EXR_DISABLE_XMP_ATTRIBUTE // warning: Non-standard attribute!
         if (!key.compare(QStringLiteral(META_KEY_XMP_ADOBE), Qt::CaseInsensitive)) {
-            header.insert("xmp", Imf::StringAttribute(text.toStdString()));
+            xmpData = text;
         }
-#endif
 
         if (!key.compare(QStringLiteral(META_KEY_MANUFACTURER), Qt::CaseInsensitive)) {
             header.insert("cameraMake", Imf::StringAttribute(text.toStdString()));
@@ -641,6 +700,41 @@ static void setMetadata(const QImage &image, Imf::Header &header)
         header.insert("pixelAspectRatio", Imf::FloatAttribute(float(image.dotsPerMeterY()) / float(image.dotsPerMeterX())));
     }
 
+#ifndef EXR_DISABLE_XMP_ATTRIBUTE
+    if (!xmpData.isEmpty()) {
+        header.insert("xmp", Imf::StringAttribute(xmpData.toStdString()));
+    }
+#endif
+
+#ifndef EXR_DISABLE_ADOBE_ATTRIBUTE
+    auto resInfo = PSDResolutionInfoBlock::fromImage(image);
+    if (resInfo.isValid()) {
+        PSDImageResourceBlock irb;
+        irb.data = resInfo.toByteArray();
+        if (!irb.data.isEmpty())
+            irs.insert(IRI_RESOLUTIONINFO, irb);
+    }
+    auto exif = MicroExif::fromImage(image);
+    if (!exif.isEmpty()) {
+        exif.setTransformation(transformation);
+        PSDImageResourceBlock irb;
+        irb.data = exif.toByteArray(QDataStream::BigEndian);
+        irs.insert(IRI_EXIFDATA1, irb);
+    }
+    if (!xmpData.isEmpty()) {
+        PSDImageResourceBlock irb;
+        irb.data = xmpData.toUtf8();
+        irs.insert(IRI_XMPMETADATA, irb);
+    }
+    if (!irs.isEmpty()) {
+        bool ok = false;
+        auto ba = irs.toByteArray(&ok);
+        if (ok) {
+            header.insert("adobe_rsrc", Imf::OpaqueAttribute("adobe_rsrc", ba.size(), ba.data()));
+        }
+    }
+#endif
+
     // set default chroma (default constructor ITU-R BT.709-3 -> sRGB)
     // The image is converted to Linear sRGB so, the chroma is the default EXR value.
     // If a file doesn’t have a chromaticities attribute, display software should assume that the
@@ -683,11 +777,15 @@ bool EXRHandler::write(const QImage &image)
         }
 
         // set metadata (EXR attributes)
-        setMetadata(image, header);
+        setMetadata(image, header, m_transformation);
 
         // write the EXR
         K_OStream ostr(device());
         auto channelsType = image.hasAlphaChannel() ? Imf::RgbaChannels::WRITE_RGBA : Imf::RgbaChannels::WRITE_RGB;
+        if (m_subType == EXR_SUBFORMAT_YC && !(width % 2) && !(height % 2)) {
+            // Works only with images with height and width that are multiples of 2.
+            channelsType = channelsType == Imf::RgbaChannels::WRITE_RGBA ? Imf::RgbaChannels::WRITE_YCA : Imf::RgbaChannels::WRITE_YC;
+        }
         if (image.format() == QImage::Format_Mono ||
             image.format() == QImage::Format_MonoLSB ||
             image.format() == QImage::Format_Grayscale16 ||
@@ -699,7 +797,7 @@ bool EXRHandler::write(const QImage &image)
         pixels.resizeErase(EXR_LINES_PER_BLOCK, width);
 
         // convert the image and write into the stream
-        auto convFormat = image.hasAlphaChannel() ? QImage::Format_RGBA32FPx4 : QImage::Format_RGBX32FPx4;
+        auto convFormat = image.hasAlphaChannel() ? QImage::Format_RGBA32FPx4_Premultiplied : QImage::Format_RGBX32FPx4;
         ScanLineConverter slc(convFormat);
         slc.setDefaultSourceColorSpace(QColorSpace(QColorSpace::SRgb));
         slc.setTargetColorSpace(QColorSpace(QColorSpace::SRgbLinear));
@@ -743,6 +841,24 @@ void EXRHandler::setOption(ImageOption option, const QVariant &value)
             m_quality = q;
         }
     }
+    if (option == QImageIOHandler::SubType) {
+        auto subType = value.toByteArray();
+        auto list = EXRHandler::option(QImageIOHandler::SupportedSubTypes).value<QList<QByteArray>>();
+        if (list.contains(subType)) {
+            m_subType = subType;
+        } else {
+            m_subType = EXR_SUBFORMAT_RGB;
+        }
+    }
+#ifndef EXR_DISABLE_ADOBE_ATTRIBUTE
+    if (option == QImageIOHandler::ImageTransformation) {
+        auto ok = false;
+        auto t = value.toInt(&ok);
+        if (ok) {
+            m_transformation = QImageIOHandler::Transformation(t);
+        }
+    }
+#endif
 }
 
 bool EXRHandler::supportsOption(ImageOption option) const
@@ -761,6 +877,17 @@ bool EXRHandler::supportsOption(ImageOption option) const
     if (option == QImageIOHandler::Quality) {
         return true;
     }
+    if (option == QImageIOHandler::SubType) {
+        return true;
+    }
+    if (option == QImageIOHandler::SupportedSubTypes) {
+        return true;
+    }
+#ifndef EXR_DISABLE_ADOBE_ATTRIBUTE
+    if (option == QImageIOHandler::ImageTransformation) {
+        return true;
+    }
+#endif
     return false;
 }
 
@@ -814,6 +941,38 @@ QVariant EXRHandler::option(ImageOption option) const
     if (option == QImageIOHandler::Quality) {
         v = QVariant(m_quality);
     }
+
+    if (option == QImageIOHandler::SupportedSubTypes) {
+        v = QVariant::fromValue(QList<QByteArray>() << EXR_SUBFORMAT_RGB << EXR_SUBFORMAT_YC);
+    }
+
+    if (option == QImageIOHandler::SubType) {
+        v = QVariant::fromValue(m_subType);
+    }
+
+#ifndef EXR_DISABLE_ADOBE_ATTRIBUTE
+    if (option == QImageIOHandler::ImageTransformation) {
+        if (auto d = device()) {
+            // transactions works on both random and sequential devices
+            d->startTransaction();
+            if (m_startPos > -1) {
+                d->seek(m_startPos);
+            }
+            try {
+                K_IStream istr(d);
+                Imf::RgbaInputFile file(istr);
+                auto irs = readPSDImageResourceSection(file.header());
+                if (irs.contains(IRI_EXIFDATA1)) {
+                    auto exif = MicroExif::fromByteArray(irs.value(IRI_EXIFDATA1).data);
+                    v = int(exif.transformation());
+                }
+            } catch (const std::exception &) {
+                // broken file or unsupported version
+            }
+            d->rollbackTransaction();
+        }
+    }
+#endif
 
     return v;
 }

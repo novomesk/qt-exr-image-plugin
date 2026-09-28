@@ -1,20 +1,20 @@
 TARGET = kimg_exr6
 
 DEFINES += WINVER=0x0601 _WIN32_WINNT=0x0601
-INCLUDEPATH += ../install-win7/include/Imath ../install-win7/include/OpenEXR
+INCLUDEPATH += ../install-win7/include ../install-win7/include/Imath ../install-win7/include/OpenEXR
 
-HEADERS = ../src/exr_p.h ../src/scanlineconverter_p.h ../src/util_p.h
-SOURCES = ../src/exr.cpp ../src/scanlineconverter.cpp
+HEADERS = ../src/exr_p.h ../src/scanlineconverter_p.h ../src/util_p.h ../src/microexif_p.h ../src/photoshop_p.h
+SOURCES = ../src/exr.cpp ../src/scanlineconverter.cpp ../src/microexif.cpp ../src/photoshop.cpp
 OTHER_FILES = ../src/exr.json
 
-LIBS += ../install-win7/lib/OpenEXR-3_4.lib ../install-win7/lib/OpenEXRUtil-3_4.lib ../install-win7/lib/OpenEXRCore-3_4.lib ../install-win7/lib/Iex-3_4.lib ../install-win7/lib/IlmThread-3_4.lib ../install-win7/lib/Imath-3_2.lib
+LIBS += ../install-win7/lib/OpenEXR-3_5.lib ../install-win7/lib/OpenEXRUtil-3_5.lib ../install-win7/lib/OpenEXRCore-3_5.lib ../install-win7/lib/Iex-3_5.lib ../install-win7/lib/IlmThread-3_5.lib ../install-win7/lib/Imath-3_2.lib
 
 TEMPLATE = lib
 
 CONFIG += release skip_target_version_ext c++17 warn_on plugin exceptions
 CONFIG -= separate_debug_info debug debug_and_release force_debug_info
 
-win32:VERSION = 6.29.1
+win32:VERSION = 6.31.0
 QMAKE_TARGET_COMPANY = "Daniel Novomesky"
 QMAKE_TARGET_PRODUCT = "qt-exr-image-plugin"
 QMAKE_TARGET_DESCRIPTION = "OpenEXR plug-in for Qt6 applications"
